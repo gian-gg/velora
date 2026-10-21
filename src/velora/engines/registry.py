@@ -4,8 +4,10 @@ from collections.abc import Callable
 
 from velora.engines.base import Engine, EngineError
 from velora.engines.fake import FakeEngine
+from velora.engines.kokoro import KokoroEngine
 
 ENGINES: dict[str, Callable[[], Engine]] = {
+    "kokoro": KokoroEngine,
     "fake": FakeEngine,
 }
 HIDDEN_ENGINES = frozenset({"fake"})
