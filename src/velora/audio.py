@@ -2,7 +2,8 @@
 
 import shutil
 import subprocess
-from collections.abc import Iterable
+import tempfile
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,20 +51,37 @@ def silence(seconds: float, sample_rate: int) -> Samples:
     return np.zeros(int(seconds * sample_rate), dtype=np.float32)
 
 
-def assemble(
+def with_pauses(
     segments: Iterable[tuple[Samples, bool]],
     sample_rate: int,
     chunk_pause: float = PAUSE_CHUNK_SECONDS,
     paragraph_pause: float = PAUSE_PARAGRAPH_SECONDS,
-) -> Samples:
-    """Concatenate (samples, paragraph_end) segments, with a pause after every one but the last."""
-    parts: list[Samples] = []
+) -> Iterator[Samples]:
+    """Yield (samples, paragraph_end) segments lazily, with a pause between consecutive ones."""
+    pause: Samples | None = None
     for samples, paragraph_end in segments:
-        parts += [samples, silence(paragraph_pause if paragraph_end else chunk_pause, sample_rate)]
-    return np.concatenate(parts[:-1]) if parts else np.zeros(0, dtype=np.float32)
+        if pause is not None:
+            yield pause
+        yield samples
+        pause = silence(paragraph_pause if paragraph_end else chunk_pause, sample_rate)
 
 
-def encode(samples: Samples, sample_rate: int, path: Path, tags: Tags) -> None:
+def _feed(process: subprocess.Popen[bytes], blocks: Iterable[Samples]) -> int:
+    """Stream blocks to ffmpeg's stdin; return samples written, stopping if ffmpeg exits early."""
+    assert process.stdin is not None
+    written = 0
+    try:
+        for block in blocks:
+            process.stdin.write(np.clip(block, -1.0, 1.0).astype("<f4").tobytes())
+            written += len(block)
+        process.stdin.close()
+    except BrokenPipeError:
+        pass
+    return written
+
+
+def encode(blocks: Iterable[Samples], sample_rate: int, path: Path, tags: Tags) -> float:
+    """Stream sample blocks through ffmpeg into path; return the seconds of audio written."""
     codec = CODECS.get(path.suffix.lower())
     if codec is None:
         raise AudioError(
@@ -79,9 +97,20 @@ def encode(samples: Samples, sample_rate: int, path: Path, tags: Tags) -> None:
         "-f", "f32le", "-ar", str(sample_rate), "-ac", "1", "-i", "pipe:0",
         *tags.ffmpeg_args(), *codec, str(partial),
     ]  # fmt: skip
-    pcm = np.clip(samples, -1.0, 1.0).astype("<f4").tobytes()
-    result = subprocess.run(command, input=pcm, capture_output=True, check=False)
-    if result.returncode != 0:
-        partial.unlink(missing_ok=True)
-        raise AudioError(f"ffmpeg failed: {result.stderr.decode(errors='replace').strip()}")
+    with tempfile.TemporaryFile() as errors:
+        process = subprocess.Popen(
+            command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errors
+        )
+        try:
+            written = _feed(process, blocks)
+        except BaseException:
+            process.kill()
+            process.wait()
+            partial.unlink(missing_ok=True)
+            raise
+        if process.wait() != 0:
+            partial.unlink(missing_ok=True)
+            errors.seek(0)
+            raise AudioError(f"ffmpeg failed: {errors.read().decode(errors='replace').strip()}")
     partial.replace(path)
+    return written / sample_rate
