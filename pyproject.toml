@@ -1,0 +1,19 @@
+[project]
+name = "velora"
+version = "0.1.0"
+description = "CLI that turns EPUB and PDF chapters or page ranges into audio using pluggable TTS models"
+readme = "README.md"
+authors = [
+    { name = "Geri Gian Epanto", email = "epanto.gg@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+velora = "velora:main"
+
+[build-system]
+requires = ["uv_build>=0.13.3,<0.14.0"]
+build-backend = "uv_build"
