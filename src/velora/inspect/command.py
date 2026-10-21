@@ -8,6 +8,7 @@ import typer
 from velora.config import DEFAULT_WPM
 from velora.inspect.render import render_book, render_chapter
 from velora.readers.epub import EpubError, load_book
+from velora.text.normalize import normalize
 
 
 def inspect_book(
@@ -17,8 +18,11 @@ def inspect_book(
     ] = DEFAULT_WPM,
     show: Annotated[
         int | None,
-        typer.Option(min=1, metavar="N", help="Preview the opening text of chapter N."),
+        typer.Option(min=1, metavar="N", help="Preview chapter N as the TTS model will read it."),
     ] = None,
+    raw: Annotated[
+        bool, typer.Option("--raw", help="With --show, print the text before normalization.")
+    ] = False,
 ) -> None:
     """List a book's chapters with word counts and estimated minutes."""
     try:
@@ -36,4 +40,4 @@ def inspect_book(
             f"chapter {show} does not exist; the book has {len(book.chapters)}",
             param_hint="--show",
         )
-    typer.echo(render_chapter(book.chapters[show - 1]))
+    typer.echo(render_chapter(book.chapters[show - 1], transform=None if raw else normalize))

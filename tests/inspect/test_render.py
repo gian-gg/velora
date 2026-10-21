@@ -58,3 +58,9 @@ def test_render_chapter_shows_opening_paragraphs() -> None:
         "3. The Gate  (3 words)\n\none\n\ntwo\n\n… 1 more paragraphs"
     )
     assert render_chapter(ch) == "3. The Gate  (3 words)\n\none\n\ntwo\n\nthree"
+
+
+def test_render_chapter_applies_transform_and_drops_empty_results() -> None:
+    ch = Chapter(index=1, title="T", paragraphs=("a", "skip", "b"))
+    out = render_chapter(ch, transform=lambda p: "" if p == "skip" else p.upper())
+    assert out == "1. T  (3 words)\n\nA\n\nB"

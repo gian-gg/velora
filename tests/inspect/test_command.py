@@ -40,6 +40,18 @@ def test_inspect_show_previews_chapter(make_epub: MakeEpub) -> None:
     assert result.stdout == "1. Prologue  (3 words)\n\nPrologue\n\nIt began.\n"
 
 
+def test_inspect_show_normalizes_text(make_epub: MakeEpub) -> None:
+    path = make_epub([Doc("<p>Dr. Lee paid $5 in 1984.</p>", toc_title="One")])
+    result = runner.invoke(app, ["inspect", str(path), "--show", "1"])
+    assert "Doctor Lee paid five dollars in nineteen eighty-four." in result.stdout
+
+
+def test_inspect_show_raw_skips_normalization(make_epub: MakeEpub) -> None:
+    path = make_epub([Doc("<p>Dr. Lee paid $5 in 1984.</p>", toc_title="One")])
+    result = runner.invoke(app, ["inspect", str(path), "--show", "1", "--raw"])
+    assert "Dr. Lee paid $5 in 1984." in result.stdout
+
+
 def test_inspect_show_out_of_range_fails(make_epub: MakeEpub) -> None:
     result = runner.invoke(app, ["inspect", str(two_chapter_book(make_epub)), "--show", "9"])
     assert result.exit_code == 2

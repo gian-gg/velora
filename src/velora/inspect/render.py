@@ -1,5 +1,7 @@
 """Plain-text rendering of a book's chapter table and chapter previews."""
 
+from collections.abc import Callable
+
 from velora.book import Book, Chapter
 from velora.config import (
     INSPECT_MAX_TITLE_WIDTH,
@@ -53,9 +55,14 @@ def render_book(book: Book, wpm: int) -> str:
     )
 
 
-def render_chapter(chapter: Chapter, paragraphs: int = INSPECT_PREVIEW_PARAGRAPHS) -> str:
-    shown = chapter.paragraphs[:paragraphs]
-    remaining = len(chapter.paragraphs) - len(shown)
+def render_chapter(
+    chapter: Chapter,
+    transform: Callable[[str], str] | None = None,
+    paragraphs: int = INSPECT_PREVIEW_PARAGRAPHS,
+) -> str:
+    opening = chapter.paragraphs[:paragraphs]
+    remaining = len(chapter.paragraphs) - len(opening)
+    shown = [t for t in map(transform, opening) if t] if transform else list(opening)
     blocks = [f"{chapter.index}. {chapter.title}  ({chapter.word_count:,} words)", *shown]
     if remaining:
         blocks.append(f"… {remaining} more paragraphs")
