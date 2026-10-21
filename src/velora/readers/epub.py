@@ -11,6 +11,7 @@ from ebooklib import epub
 from selectolax.lexbor import LexborHTMLParser
 
 from velora.book import Book, Chapter
+from velora.config import UNTITLED_SNIPPET_CHARS
 
 BLOCKS = "p, h1, h2, h3, h4, h5, h6, li, dt, dd, blockquote, pre, td, div"
 HEADINGS = "h1, h2, h3"
@@ -37,9 +38,8 @@ def load_book(path: Path) -> Book:
         paragraphs, heading = _extract_text(item.get_content())
         if not paragraphs:
             continue
-        index = len(chapters) + 1
-        title = _lookup(toc, item.get_name()) or heading or f"Chapter {index}"
-        chapters.append(Chapter(index=index, title=title, paragraphs=paragraphs))
+        title = _lookup(toc, item.get_name()) or heading or _snippet(paragraphs[0])
+        chapters.append(Chapter(index=len(chapters) + 1, title=title, paragraphs=paragraphs))
 
     return Book(
         title=_metadata(source, "title") or path.stem,
@@ -58,6 +58,14 @@ def _is_readable(item: Any) -> bool:
 
 def _clean(text: str) -> str:
     return " ".join(text.split())
+
+
+def _snippet(text: str) -> str:
+    """Quoted opening words, used as the title of a chapter with no TOC entry or heading."""
+    if len(text) <= UNTITLED_SNIPPET_CHARS:
+        return f"“{text}”"
+    cut = text[:UNTITLED_SNIPPET_CHARS].rsplit(" ", 1)[0]
+    return f"“{cut}…”"
 
 
 def _metadata(source: Any, name: str) -> str | None:

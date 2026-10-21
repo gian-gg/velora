@@ -56,16 +56,21 @@ def test_non_linear_and_empty_documents_are_skipped(make_epub: MakeEpub) -> None
     assert [(c.index, c.title) for c in book.chapters] == [(1, "Story"), (2, "End")]
 
 
-def test_title_falls_back_to_heading_then_number(make_epub: MakeEpub) -> None:
+def test_title_falls_back_to_heading_then_opening_words(make_epub: MakeEpub) -> None:
     book = load_book(
         make_epub(
             [
                 Doc("<h2>The  Gate</h2><p>Text.</p>"),
-                Doc("<p>No heading here.</p>"),
+                Doc("<p>Dear Kelvin,</p><p>Hi.</p>"),
+                Doc("<p>Hi. My name is Jasmine Bashara and people call me Jazz.</p>"),
             ]
         )
     )
-    assert [c.title for c in book.chapters] == ["The Gate", "Chapter 2"]
+    assert [c.title for c in book.chapters] == [
+        "The Gate",
+        "“Dear Kelvin,”",
+        "“Hi. My name is Jasmine Bashara and…”",
+    ]
 
 
 def test_paragraph_text_is_cleaned(make_epub: MakeEpub) -> None:
