@@ -8,7 +8,7 @@ import pytest
 from velora.engines import kokoro
 from velora.engines.base import EngineError, package_installed
 from velora.engines.download import RemoteFile
-from velora.engines.kokoro import KokoroEngine, parse_blend
+from velora.engines.kokoro import KokoroEngine, parse_blend, resolve_lang
 from velora.engines.registry import get_engine
 
 REAL_WEIGHTS = os.environ.get("VELORA_KOKORO_DIR")
@@ -61,9 +61,9 @@ def test_default_directory_follows_xdg_cache(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_synthesize_validates_settings_before_loading_model(tmp_path: Path) -> None:
     engine = KokoroEngine(tmp_path)
-    with pytest.raises(EngineError, match="does not support"):
+    with pytest.raises(EngineError, match=r"unknown setting\(s\) pitch"):
         engine.synthesize("hi", {"pitch": 2})
-    with pytest.raises(EngineError, match="speed must be between"):
+    with pytest.raises(EngineError, match=r"speed must be between 0\.5 and 2, got 5"):
         engine.synthesize("hi", {"speed": 5})
 
 
@@ -76,3 +76,22 @@ def test_real_synthesis_with_blend_and_unknown_voice() -> None:
     assert len(samples) > engine.sample_rate // 2
     with pytest.raises(EngineError, match="unknown kokoro voice"):
         engine.synthesize("Hi.", {"voice": "zz_nobody"})
+
+
+@pytest.mark.parametrize(
+    ("lang", "spec", "expected"),
+    [
+        ("auto", "bf_emma", "en-gb"),
+        ("auto", "af_heart", "en-us"),
+        ("auto", "af_heart:0.3,bm_george:0.7", "en-gb"),
+        ("en-us", "bf_emma", "en-us"),
+    ],
+)
+def test_resolve_lang(lang: str, spec: str, expected: str) -> None:
+    assert resolve_lang(lang, spec) == expected
+
+
+def test_check_voice_skips_name_check_without_weights(tmp_path: Path) -> None:
+    KokoroEngine(tmp_path).check_voice({"voice": "zz_unknown", "lang": "en-gb"})
+    with pytest.raises(EngineError, match="invalid voice blend"):
+        KokoroEngine(tmp_path).check_voice({"voice": "af_heart:0"})

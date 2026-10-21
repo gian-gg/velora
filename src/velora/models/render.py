@@ -1,10 +1,14 @@
 """Plain-text rendering of engine readiness and voice lists."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import groupby
 from pathlib import Path
 
 from velora.engines.base import Engine, WeightsStatus, install_hint, package_installed
+from velora.engines.settings import Setting
+
+HEADERS = ("setting", "value", "default", "allowed")
 
 
 @dataclass(frozen=True)
@@ -65,3 +69,33 @@ def render_voices(engine_name: str, voices: list[str]) -> str:
         for prefix, names in groupby(ordered, key=_prefix)
     ]
     return "\n".join([f"{engine_name} voices ({len(voices)}), as PREFIX_NAME:", "", *lines])
+
+
+def show_value(value: object) -> str:
+    return f"{value:g}" if isinstance(value, float) else str(value)
+
+
+def _setting_row(setting: Setting, saved: Mapping[str, object]) -> tuple[str, ...]:
+    value = show_value(saved.get(setting.name, setting.default))
+    marker = " *" if setting.name in saved else ""
+    return (setting.name, value + marker, show_value(setting.default), setting.allowed())
+
+
+def render_settings(
+    groups: list[tuple[str, tuple[Setting, ...], Mapping[str, object]]], source: Path
+) -> str:
+    """Render (heading, settings, saved values) groups as one aligned table."""
+    blocks = [
+        (heading, [_setting_row(s, saved) for s in settings]) for heading, settings, saved in groups
+    ]
+    rows = [row for _, block in blocks for row in block]
+    widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(HEADERS)]
+
+    def line(cells: tuple[str, ...]) -> str:
+        return "  ".join(c.ljust(w) for c, w in zip(cells, widths, strict=True)).rstrip()
+
+    lines = [line(HEADERS)]
+    for heading, block in blocks:
+        lines += ["", heading, *(line(r) for r in block)]
+    lines += ["", f"* saved in {short_path(source)}"]
+    return "\n".join(lines)

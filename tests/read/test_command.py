@@ -90,16 +90,15 @@ def test_bad_requests_fail_before_synthesis(book: Path, args: list[str], message
     assert message in result.stderr
 
 
-@needs_ffmpeg
-def test_engine_error_mid_run_leaves_no_file(book: Path, tmp_path: Path) -> None:
+def test_invalid_voice_setting_fails_before_synthesis(book: Path, tmp_path: Path) -> None:
     out = tmp_path / "x.wav"
     result = runner.invoke(
         app,
         ["read", str(book), "--chapter", "1", "--engine", "fake", "--voice", "x", "-o", str(out)],
     )
     assert result.exit_code == 1
-    assert "does not support voice setting(s) voice" in result.stderr
-    assert not list(tmp_path.glob("*.wav"))
+    assert "command line: unknown setting(s) voice; allowed: frequency" in result.stderr
+    assert not out.exists()
     assert not list(tmp_path.glob(".*part*"))
 
 
@@ -107,3 +106,31 @@ def test_missing_book_fails(tmp_path: Path) -> None:
     result = runner.invoke(app, ["read", str(tmp_path / "nope.epub"), "--chapter", "1"])
     assert result.exit_code == 1
     assert "file not found" in result.stderr
+
+
+@needs_ffmpeg
+def test_saved_config_applies_and_flags_override(
+    book: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "cfg" / "velora" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text("[read]\nparagraph_pause = 2.0\n\n[engines.fake]\nfrequency = 440.0\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    paused, plain = tmp_path / "paused.wav", tmp_path / "plain.wav"
+    args = ["read", str(book), "--chapter", "1", "--engine", "fake", "-o"]
+    assert runner.invoke(app, [*args, str(paused)]).exit_code == 0
+    config.write_text("[engines.fake]\nfrequency = 440.0\n")
+    assert runner.invoke(app, [*args, str(plain)]).exit_code == 0
+    assert seconds(paused) - seconds(plain) == pytest.approx(1.3, abs=0.01)
+
+
+def test_invalid_saved_config_names_the_file(
+    book: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "cfg" / "velora" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text("[engines.fake]\nfrequency = 1.0\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    result = runner.invoke(app, ["read", str(book), "--chapter", "1", "--engine", "fake"])
+    assert result.exit_code == 1
+    assert "config.toml [engines.fake]: frequency must be between 20 and 2000" in result.stderr

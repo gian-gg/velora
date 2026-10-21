@@ -15,6 +15,7 @@ from velora.engines.base import (
 )
 from velora.engines.fake import FakeEngine
 from velora.engines.registry import engine_names, get_engine
+from velora.engines.settings import Setting
 
 
 @dataclass
@@ -26,6 +27,10 @@ class StubEngine:
     sample_rate: int = 8_000
     downloaded: bool = True
     calls: list[str] = field(default_factory=list)
+    settings: tuple[Setting, ...] = ()
+
+    def check_voice(self, voice: Voice) -> None:
+        self.calls.append("check")
 
     def weights_status(self) -> WeightsStatus:
         return WeightsStatus(downloaded=self.downloaded)
@@ -52,7 +57,7 @@ def test_fake_engine_renders_tone_proportional_to_text() -> None:
 
 
 def test_fake_engine_rejects_unknown_voice_settings() -> None:
-    with pytest.raises(EngineError, match=r"does not support voice setting.*speed"):
+    with pytest.raises(EngineError, match=r"unknown setting\(s\) speed; allowed: frequency"):
         FakeEngine().synthesize("hi", {"speed": 1.2})
 
 

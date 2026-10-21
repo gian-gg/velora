@@ -13,9 +13,9 @@ from velora.engines.base import (
     Samples,
     Voice,
     WeightsStatus,
-    reject_unknown_keys,
 )
 from velora.engines.download import RemoteFile, fetch
+from velora.engines.settings import Setting, Value, resolve
 
 if TYPE_CHECKING:
     from kokoro_onnx import Kokoro
@@ -34,7 +34,30 @@ VOICES = RemoteFile(
     size=28_214_398,
 )
 FILES = (MODEL, VOICES)
-MIN_SPEED, MAX_SPEED = 0.5, 2.0
+BRITISH_PREFIX = "b"
+
+SETTINGS = (
+    Setting(
+        "voice", KOKORO_DEFAULT_VOICE, "Preset or weighted blend; see velora models voices kokoro"
+    ),
+    Setting("speed", 1.0, "Speaking rate", minimum=0.5, maximum=2.0),
+    Setting(
+        "lang",
+        "auto",
+        "Pronunciation; auto picks en-gb for British (b*) voices",
+        choices=("auto", "en-us", "en-gb"),
+    ),
+    Setting("sentence_pause", 0.25, "Pause after each sentence, in seconds", 0.0, 2.0),
+    Setting("clause_pause", 0.1, "Pause at commas and semicolons, in seconds", 0.0, 2.0),
+)
+
+
+def resolve_lang(lang: str, voice_spec: str) -> str:
+    """Map "auto" to en-gb when the blend's main voice is British, else en-us."""
+    if lang != "auto":
+        return lang
+    main = max(parse_blend(voice_spec), key=lambda part: part[1])[0]
+    return "en-gb" if main.startswith(BRITISH_PREFIX) else "en-us"
 
 
 def parse_blend(spec: str) -> list[tuple[str, float]]:
@@ -59,6 +82,7 @@ class KokoroEngine:
     requires: tuple[str, ...] = ("kokoro_onnx",)
     max_chunk_chars = 300
     sample_rate = 24_000
+    settings: tuple[Setting, ...] = SETTINGS
 
     def __init__(self, directory: Path | None = None) -> None:
         self.directory = directory or models_dir() / "kokoro"
@@ -95,19 +119,34 @@ class KokoroEngine:
 
         return Kokoro(str(MODEL.path(self.directory)), str(VOICES.path(self.directory)))
 
+    def _values(self, voice: Voice) -> dict[str, Value]:
+        return resolve(self.settings, [("kokoro voice", voice)])
+
+    def check_voice(self, voice: Voice) -> None:
+        values = self._values(voice)
+        blend = parse_blend(str(values["voice"]))
+        if self.weights_status().downloaded:
+            missing = [name for name, _ in blend if name not in self._voice_names]
+            if missing:
+                raise EngineError(
+                    f"unknown kokoro voice(s) {', '.join(missing)}; see velora models voices kokoro"
+                )
+
     def _style(self, spec: str) -> Samples:
         blend = parse_blend(spec)
-        missing = [name for name, _ in blend if name not in self._voice_names]
-        if missing:
-            raise EngineError(f"unknown kokoro voice(s) {', '.join(missing)}; see velora models")
         style = sum(w * self._model.get_voice_style(name) for name, w in blend)
         return np.asarray(style, dtype=np.float32)
 
     def synthesize(self, text: str, voice: Voice) -> Samples:
-        reject_unknown_keys(self, voice, {"voice", "speed"})
-        speed = float(voice.get("speed", 1.0))
-        if not MIN_SPEED <= speed <= MAX_SPEED:
-            raise EngineError(f"kokoro speed must be between {MIN_SPEED} and {MAX_SPEED}")
-        style = self._style(str(voice.get("voice", KOKORO_DEFAULT_VOICE)))
-        samples, _ = self._model.create(text, voice=style, speed=speed, lang="en-us")
+        self.check_voice(voice)
+        values = self._values(voice)
+        spec = str(values["voice"])
+        samples, _ = self._model.create(
+            text,
+            voice=self._style(spec),
+            speed=float(values["speed"]),
+            lang=resolve_lang(str(values["lang"]), spec),
+            sentence_pause=float(values["sentence_pause"]),
+            clause_pause=float(values["clause_pause"]),
+        )
         return np.asarray(samples, dtype=np.float32)

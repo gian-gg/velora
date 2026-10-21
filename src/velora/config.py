@@ -28,3 +28,9 @@ def models_dir() -> Path:
     """Where engine weights are cached: $XDG_CACHE_HOME/velora/models."""
     cache = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
     return Path(cache) / "velora" / "models"
+
+
+def config_file() -> Path:
+    """The user's settings file: $XDG_CONFIG_HOME/velora/config.toml."""
+    base = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
+    return Path(base) / "velora" / "config.toml"

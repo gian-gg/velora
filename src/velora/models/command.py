@@ -1,5 +1,6 @@
 """`velora models`: list engines, download or remove weights, list voices."""
 
+from collections.abc import Mapping
 from typing import Annotated
 
 import typer
@@ -12,9 +13,20 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
+from velora.config import config_file
 from velora.engines.base import Engine, EngineError
 from velora.engines.registry import engine_names, get_engine
-from velora.models.render import engine_row, render_engines, render_voices
+from velora.engines.settings import Setting, find_setting
+from velora.models.render import (
+    engine_row,
+    render_engines,
+    render_settings,
+    render_voices,
+    short_path,
+    show_value,
+)
+from velora.read.settings import READ_SETTINGS
+from velora.user_config import ConfigError, UserConfig, load_config, save_config, with_value
 
 models_app = typer.Typer(help="List TTS engines and manage their downloaded weights.")
 
@@ -85,3 +97,74 @@ def voices(name: EngineName) -> None:
     if not engine.weights_status().downloaded:
         raise _fail(f"{name} weights are not downloaded. Run: velora models download {name}")
     typer.echo(render_voices(name, engine.voices()))
+
+
+config_app = typer.Typer(help="Show or change an engine's saved settings.")
+models_app.add_typer(config_app, name="config")
+
+
+def _groups(
+    engine: Engine, config: UserConfig
+) -> list[tuple[str, tuple[Setting, ...], Mapping[str, object]]]:
+    return [
+        (engine.name, engine.settings, config.engine(engine.name)),
+        ("all engines", READ_SETTINGS, config.read),
+    ]
+
+
+@config_app.callback(invoke_without_command=True)
+def config(ctx: typer.Context, name: EngineName) -> None:
+    """Show every setting with its current value, default and allowed values."""
+    engine = _engine(name)
+    ctx.obj = engine
+    if ctx.invoked_subcommand is None:
+        typer.echo(render_settings(_groups(engine, _load()), config_file()))
+
+
+def _load() -> UserConfig:
+    try:
+        return load_config()
+    except ConfigError as exc:
+        raise _fail(str(exc)) from exc
+
+
+def _section(engine: Engine, key: str) -> tuple[str, Setting]:
+    for section, settings in ((engine.name, engine.settings), ("read", READ_SETTINGS)):
+        setting = find_setting(settings, key)
+        if setting is not None:
+            return section, setting
+    names = [s.name for s in (*engine.settings, *READ_SETTINGS)]
+    raise _fail(f"unknown setting {key!r}; available: {', '.join(names)}")
+
+
+@config_app.command("set")
+def set_value(
+    ctx: typer.Context,
+    key: Annotated[str, typer.Argument(help="Setting name.")],
+    value: Annotated[str, typer.Argument(help="New value.")],
+) -> None:
+    """Save a setting, validated by the engine."""
+    engine: Engine = ctx.obj
+    section, setting = _section(engine, key)
+    try:
+        parsed = setting.coerce(value)
+        if section == engine.name:
+            engine.check_voice({key: parsed})
+    except EngineError as exc:
+        raise _fail(str(exc)) from exc
+    path = save_config(with_value(_load(), section, key, parsed))
+    typer.echo(f"{engine.name} {key} = {value} (saved to {short_path(path)})")
+
+
+@config_app.command("unset")
+def unset_value(
+    ctx: typer.Context, key: Annotated[str, typer.Argument(help="Setting name.")]
+) -> None:
+    """Remove a saved setting so its default applies."""
+    engine: Engine = ctx.obj
+    section, setting = _section(engine, key)
+    path = save_config(with_value(_load(), section, key, None))
+    typer.echo(
+        f"{engine.name} {key} reset to default {show_value(setting.default)}"
+        f" (saved to {short_path(path)})"
+    )

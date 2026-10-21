@@ -4,10 +4,13 @@ import importlib.util
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from velora.engines.settings import Setting
 
 Samples = NDArray[np.float32]
 Voice = Mapping[str, Any]
@@ -31,6 +34,7 @@ class Engine(Protocol):
     requires: tuple[str, ...]
     max_chunk_chars: int
     sample_rate: int
+    settings: tuple["Setting", ...]
 
     def weights_status(self) -> WeightsStatus: ...
 
@@ -39,6 +43,10 @@ class Engine(Protocol):
     def remove_weights(self) -> None: ...
 
     def voices(self) -> list[str]: ...
+
+    def check_voice(self, voice: Voice) -> None:
+        """Raise EngineError if voice settings are invalid, without loading the model."""
+        ...
 
     def synthesize(self, text: str, voice: Voice) -> Samples:
         """Return mono float32 samples at `sample_rate`."""
@@ -59,13 +67,4 @@ def ensure_ready(engine: Engine) -> None:
     if not engine.weights_status().downloaded:
         raise EngineError(
             f"{engine.name} weights are not downloaded. Run: velora models download {engine.name}"
-        )
-
-
-def reject_unknown_keys(engine: Engine, voice: Voice, allowed: set[str]) -> None:
-    unknown = sorted(set(voice) - allowed)
-    if unknown:
-        raise EngineError(
-            f"{engine.name} does not support voice setting(s) {', '.join(unknown)};"
-            f" allowed: {', '.join(sorted(allowed))}"
         )

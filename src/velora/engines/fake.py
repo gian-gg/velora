@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from velora.engines.base import Progress, Samples, Voice, WeightsStatus, reject_unknown_keys
+from velora.engines.base import Progress, Samples, Voice, WeightsStatus
+from velora.engines.settings import Setting, resolve
 
 SECONDS_PER_CHAR = 0.01
 DEFAULT_FREQUENCY = 220.0
@@ -15,6 +16,9 @@ class FakeEngine:
     requires: tuple[str, ...] = ()
     max_chunk_chars = 200
     sample_rate = 16_000
+    settings: tuple[Setting, ...] = (
+        Setting("frequency", DEFAULT_FREQUENCY, "Tone pitch in Hz", 20.0, 2000.0),
+    )
 
     def weights_status(self) -> WeightsStatus:
         return WeightsStatus(downloaded=True)
@@ -28,9 +32,11 @@ class FakeEngine:
     def voices(self) -> list[str]:
         return []
 
+    def check_voice(self, voice: Voice) -> None:
+        resolve(self.settings, [("fake voice", voice)])
+
     def synthesize(self, text: str, voice: Voice) -> Samples:
-        reject_unknown_keys(self, voice, {"frequency"})
-        frequency = float(voice.get("frequency", DEFAULT_FREQUENCY))
+        frequency = float(resolve(self.settings, [("fake voice", voice)])["frequency"])
         count = int(len(text) * SECONDS_PER_CHAR * self.sample_rate)
         t = np.arange(count, dtype=np.float32) / self.sample_rate
         return (AMPLITUDE * np.sin(2 * np.pi * frequency * t)).astype(np.float32)

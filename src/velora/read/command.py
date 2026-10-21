@@ -1,8 +1,9 @@
 """`velora read`: synthesize chapters of a book into tagged audio files."""
 
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 from rich.progress import (
@@ -16,13 +17,16 @@ from rich.progress import (
 
 from velora.audio import AudioError, Tags, encode, with_pauses
 from velora.book import Book, Chapter
-from velora.config import DEFAULT_ENGINE, DEFAULT_OUTPUT_SUFFIX
+from velora.config import DEFAULT_ENGINE, DEFAULT_OUTPUT_SUFFIX, config_file
 from velora.engines.base import Engine, EngineError, ensure_ready
 from velora.engines.registry import get_engine
+from velora.engines.settings import Value, resolve
 from velora.models.render import short_path
 from velora.read.pipeline import chapter_chunks, synthesize
 from velora.read.selection import SelectionError, default_name, select_chapters
+from velora.read.settings import READ_SETTINGS
 from velora.readers.epub import EpubError, load_book
+from velora.user_config import ConfigError, load_config
 
 
 def _fail(message: str) -> typer.Exit:
@@ -36,8 +40,13 @@ def _clock(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
-def _render(
-    engine: Engine, book: Book, chapters: tuple[Chapter, ...], voice: dict[str, Any], out: Path
+def _render(  # noqa: PLR0913, PLR0917
+    engine: Engine,
+    book: Book,
+    chapters: tuple[Chapter, ...],
+    voice: dict[str, Value],
+    pauses: dict[str, Value],
+    out: Path,
 ) -> None:
     chunks = [c for chapter in chapters for c in chapter_chunks(chapter, engine.max_chunk_chars)]
     first, last = chapters[0], chapters[-1]
@@ -56,12 +65,36 @@ def _render(
     with Progress(*columns) as bar:
         task = bar.add_task(out.name, total=sum(len(c.text) for c in chunks))
         segments = synthesize(engine, chunks, voice, lambda c: bar.advance(task, len(c.text)))
-        seconds = encode(with_pauses(segments, engine.sample_rate), engine.sample_rate, out, tags)
+        blocks = with_pauses(
+            segments,
+            engine.sample_rate,
+            chunk_pause=float(pauses["chunk_pause"]),
+            paragraph_pause=float(pauses["paragraph_pause"]),
+        )
+        seconds = encode(blocks, engine.sample_rate, out, tags)
     elapsed = time.monotonic() - started
     typer.echo(
         f"wrote {short_path(out)}  {_clock(seconds)} of audio in {_clock(elapsed)}"
         f" ({elapsed / max(seconds, 1e-9):.2f}x real time)"
     )
+
+
+def _settings(
+    engine: Engine, overrides: Mapping[str, object]
+) -> tuple[dict[str, Value], dict[str, Value]]:
+    """Layer engine defaults, saved config and command-line flags; validate before synthesis."""
+    config = load_config()
+    saved = short_path(config_file())
+    voice = resolve(
+        engine.settings,
+        [
+            (f"{saved} [engines.{engine.name}]", config.engine(engine.name)),
+            ("command line", overrides),
+        ],
+    )
+    engine.check_voice(voice)
+    pauses = resolve(READ_SETTINGS, [(f"{saved} [read]", config.read)])
+    return voice, pauses
 
 
 def _jobs(
@@ -90,9 +123,12 @@ def read_book(  # noqa: PLR0913, PLR0917
     ] = None,
     engine_name: Annotated[str, typer.Option("--engine", help="TTS engine.")] = DEFAULT_ENGINE,
     voice: Annotated[
-        str | None, typer.Option(help="Voice name or blend, e.g. af_heart:0.6,bf_emma:0.4.")
+        str | None,
+        typer.Option(help="Override the configured voice, e.g. af_heart:0.6,bf_emma:0.4."),
     ] = None,
-    speed: Annotated[float | None, typer.Option(help="Speaking speed, 1.0 is normal.")] = None,
+    speed: Annotated[
+        float | None, typer.Option(help="Override the configured speed; 1.0 is normal.")
+    ] = None,
     output: Annotated[
         Path | None,
         typer.Option(
@@ -105,20 +141,19 @@ def read_book(  # noqa: PLR0913, PLR0917
     ] = False,
 ) -> None:
     """Synthesize chapters into an audio file."""
+    overrides = {k: v for k, v in {"voice": voice, "speed": speed}.items() if v is not None}
     try:
         book = load_book(book_path)
         selected = select_chapters(book, chapter, chapters)
         engine = get_engine(engine_name)
         ensure_ready(engine)
-    except (EpubError, SelectionError, EngineError) as exc:
+        voice_settings, pauses = _settings(engine, overrides)
+    except (EpubError, SelectionError, EngineError, ConfigError) as exc:
         raise _fail(str(exc)) from exc
 
-    settings: dict[str, Any] = {
-        k: v for k, v in {"voice": voice, "speed": speed}.items() if v is not None
-    }
     try:
         for job_chapters, out in _jobs(book_path, selected, output, split):
-            _render(engine, book, job_chapters, settings, out)
+            _render(engine, book, job_chapters, voice_settings, pauses, out)
     except (EngineError, AudioError) as exc:
         raise _fail(str(exc)) from exc
     except KeyboardInterrupt as exc:
