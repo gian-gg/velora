@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "ebooklib>=0.20",
+    "num2words>=0.5.14",
     "selectolax>=1.0.1",
     "typer>=0.27.3",
 ]
@@ -51,5 +52,5 @@ addopts = "--cov=velora --cov-report=term-missing"
 fail_under = 80
 
 [[tool.mypy.overrides]]
-module = ["ebooklib", "ebooklib.*"]
+module = ["ebooklib", "ebooklib.*", "num2words"]
 ignore_missing_imports = true
