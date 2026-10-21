@@ -1,14 +1,11 @@
 import typer
 
+from velora.inspect.command import inspect_book
+
 app = typer.Typer(no_args_is_help=True)
-
-
-@app.command()
-def hello(name: str = typer.Argument("world", help="Who to greet.")) -> None:
-    """Print a greeting."""
-    typer.echo(f"Hello, {name}!")
+app.command("inspect")(inspect_book)
 
 
 @app.callback()
 def _root() -> None:
-    """Turn EPUB and PDF chapters into audio."""
+    """Turn EPUB chapters into audio."""
