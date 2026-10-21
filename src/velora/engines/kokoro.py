@@ -75,6 +75,12 @@ class KokoroEngine:
             if not remote.present(self.directory):
                 fetch(remote, self.directory, progress)
 
+    def remove_weights(self) -> None:
+        for remote in FILES:
+            remote.path(self.directory).unlink(missing_ok=True)
+        if self.directory.is_dir() and not any(self.directory.iterdir()):
+            self.directory.rmdir()
+
     def voices(self) -> list[str]:
         with np.load(VOICES.path(self.directory)) as data:
             return sorted(data.files)

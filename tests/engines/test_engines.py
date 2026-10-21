@@ -33,6 +33,12 @@ class StubEngine:
     def download(self, progress: Progress) -> None:
         self.calls.append("download")
 
+    def remove_weights(self) -> None:
+        self.calls.append("remove")
+
+    def voices(self) -> list[str]:
+        return ["a_one", "a_two", "b_three"]
+
     def synthesize(self, text: str, voice: Voice) -> Samples:
         return np.zeros(1, dtype=np.float32)
 
@@ -93,4 +99,6 @@ def test_fake_engine_is_always_ready() -> None:
     engine.download(lambda name, done, total: seen.append(name))
     assert engine.weights_status().downloaded
     assert seen == ["fake"]
+    engine.remove_weights()
+    assert engine.voices() == []
     ensure_ready(engine)

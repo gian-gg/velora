@@ -22,6 +22,12 @@ class FakeEngine:
     def download(self, progress: Progress) -> None:
         progress("fake", 0, 0)
 
+    def remove_weights(self) -> None:
+        return None
+
+    def voices(self) -> list[str]:
+        return []
+
     def synthesize(self, text: str, voice: Voice) -> Samples:
         reject_unknown_keys(self, voice, {"frequency"})
         frequency = float(voice.get("frequency", DEFAULT_FREQUENCY))
